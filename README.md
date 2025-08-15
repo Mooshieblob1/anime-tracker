@@ -66,20 +66,7 @@ uvicorn app.main:app --reload
   - GET `/api/anilist/status` → connected?
   - POST `/api/anilist/import` → import lists (requires OAuth)
 
-## Configuration (.env)
-Settings are loaded via `pydantic-settings` from `.env`:
-
-- App
-  - `secret_key` (default: dev-secret-change-me)
-  - `algorithm` (default: HS256)
-  - `access_token_expire_minutes` (default: 1440)
-  - `database_url` (default: sqlite:///./app.db)
-- AniList
-  - `anilist_client_id` (default: 29366)
-  - `anilist_client_secret`
-  - `anilist_redirect_uri` (default: http://127.0.0.1:8000/api/anilist/callback)
-
-Note: Autocomplete and max lookups don’t require OAuth, but AniList import does.
+<!-- Configuration section intentionally omitted for MVP simplicity. Autocomplete and max lookups don’t require OAuth; AniList import is optional. -->
 
 ## Dev and tests
 - DB is auto-initialized on startup.
