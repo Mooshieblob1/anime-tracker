@@ -81,8 +81,73 @@ pytest -q
 - Datetimes are stored as UTC.
 - CORS is permissive for the MVP; tighten for production.
 
-## Roadmap (nice-to-haves)
-- Persist max chapter/episode values in the DB
-- Real sources integrations beyond AniList (e.g., MangaDex)
-- Better user management and password reset
-- Alembic migrations
+## Roadmap
+
+Below are proposed next steps that are not yet implemented. Each item includes a brief methodology to reach the milestone.
+
+1) Persist “max” chapter/episode values in the DB
+   - Goal: Show consistent “progress X of N” without re-querying AniList every time and support offline viewing.
+   - Methodology:
+     - Schema: add `max_progress: int | None` to `LibraryItem` (nullable). Create an Alembic migration.
+     - Write path: on add via autocomplete, include the fetched max in the POST payload; store it.
+     - Backfill: add a one-off admin endpoint/script to query AniList and populate `max_progress` for existing rows.
+     - UI: always render “of N” from DB when present; allow manual override.
+     - Tests: unit test create/update, and a backfill script test with mocked AniList.
+
+2) Store AniList media IDs and enrich metadata
+   - Goal: Link items to canonical AniList entries for better accuracy and future sync.
+   - Methodology:
+     - Schema: add `anilist_id: int | None` and optional fields like `format`, `site_url`.
+     - Create: when selecting from autocomplete, save the `anilist_id` along with title/cover.
+     - Enrich: add an endpoint to refresh metadata for an item (cover/title/format) from AniList.
+     - Tests: ensure ID persists and enrichment updates fields safely.
+
+3) Two-way AniList sync (statuses and progress)
+   - Goal: Keep local library and AniList in sync (import + push updates).
+   - Methodology:
+     - OAuth: persist AniList tokens securely (DB table) and implement refresh-token handling.
+     - Mapping: define status/progress mapping between local and AniList (Reading↔CURRENT, Completed↔COMPLETED, Dropped↔DROPPED, Planning↔PLANNING; episodes/chapters to progress).
+     - Push: on local PATCH, enqueue a job to update AniList via GraphQL mutation for linked `anilist_id`.
+     - Pull: extend import to upsert by `anilist_id`; add a “Sync now” endpoint to fetch updates.
+     - Background: add a simple task runner or APScheduler for periodic sync; handle retries/backoff.
+     - Conflict: last-write-wins with a `synced_at` timestamp; surface conflicts in logs.
+     - Tests: mock GraphQL; verify both push and pull paths.
+
+4) Caching and rate-limit handling for AniList queries
+   - Goal: Reduce latency and avoid rate-limit hits.
+   - Methodology:
+     - Add a small cache (SQLite table or in-memory with TTL) keyed by query and variables.
+     - Respect AniList error codes; implement exponential backoff and minimal retry.
+     - Log cache hit/miss metrics; expose debug stats endpoint.
+     - Tests: cache TTL and backoff behavior with mocked time.
+
+5) Additional source integrations (e.g., MangaDex)
+   - Goal: Search and add from non-AniList sources.
+   - Methodology:
+     - Create `app/services/mangadex.py` with thin search/details functions.
+     - Add `/api/sources/mangadex/search` and corresponding frontend wiring.
+     - Normalize result shape to current autocomplete model; store `source` accordingly.
+     - Tests: mock search results; verify add flow.
+
+6) UX improvements for the library
+   - Goal: Faster updates and better browsing.
+   - Methodology:
+     - Increment/decrement buttons next to progress; optional keyboard shortcuts.
+     - Filters (type/status) and sort (updated_at, title); pagination for large libraries.
+     - Toast notifications for save/remove; loading indicators for autocomplete.
+     - Tests: basic UI smoke via Playwright (optional) or DOM checks in unit tests.
+
+7) User management enhancements
+   - Goal: Improve beyond the demo.
+   - Methodology:
+     - Registration refinements and basic profile editing.
+     - Password reset flow (token email mock or local code entry for dev environments).
+     - Tests: auth flows and edge cases.
+
+8) Migrations with Alembic
+   - Goal: Safely evolve the schema.
+   - Methodology:
+     - Initialize Alembic; configure SQLModel metadata target.
+     - Generate migration for `max_progress` and `anilist_id` changes.
+     - Document migration commands; add a small helper script to apply on startup in dev.
+     - Tests: migration up/down on a temp DB.
