@@ -1,0 +1,295 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Anime & Manga Tracker</title>
+  <style>
+  *, *::before, *::after { box-sizing: border-box; }
+      :root { color-scheme: light dark; }
+  body { font-family: system-ui, sans-serif; margin: 2rem 6rem 2rem 2rem; max-width: 1100px; }
+      input, button, select { padding: .6rem .75rem; margin: .25rem; border-radius: .5rem; border: 1px solid #ccc; }
+  /* Compact input group: prevent overlap and double borders */
+  .input-group input, .input-group select { margin: 0; }
+  .input-group input { border-top-right-radius: 0; border-bottom-right-radius: 0; border-right: 0; }
+  .input-group select { border-top-left-radius: 0; border-bottom-left-radius: 0; border-left: 0; }
+  /* Autocomplete suggestions: force dark text for readability */
+  #auto-list { color: #111; background: #fff !important; }
+  #auto-list .row { color: inherit; }
+      button.primary { background: #2563eb; color: white; border: none; }
+      .row { display: flex; gap: .5rem; flex-wrap: wrap; align-items: center; }
+      .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 12px; }
+      .card { border: 1px solid #ddd; padding: .75rem; border-radius: .75rem; margin: .5rem 0; background: rgba(255,255,255,0.6); backdrop-filter: blur(4px); }
+      .card img { width: 100%; border-radius: .5rem; }
+      header { display:flex; align-items:center; justify-content:space-between; }
+      .muted { color: #666; font-size: .9rem; }
+      /* Modal */
+      .backdrop { position: fixed; inset: 0; background: rgba(0,0,0,.45); display: flex; align-items: center; justify-content: center; z-index: 50; }
+      .modal { width: min(560px, 92vw); background: #fff; color: #111; border-radius: 12px; padding: 1rem; box-shadow: 0 20px 40px rgba(0,0,0,.25); }
+      @media (prefers-color-scheme: dark) {
+        .modal { background: #1f2937; color: #e5e7eb; }
+      }
+    </style>
+  </head>
+  <body>
+    <header>
+      <h1>Anime & Manga Tracker</h1>
+      <div class="row">
+        <span id="authStatus" class="muted">Not signed in</span>
+        <button id="loginBtn" onclick="showLogin()">Login</button>
+        <button id="logoutBtn" style="display:none" onclick="logout()">Logout</button>
+        <button id="connectAniListBtn" class="" onclick="connectAniList()" style="display:none">Add AniList account</button>
+        <button id="importAniListBtn" class="" style="display:none" onclick="importAniList()">Import from AniList</button>
+      </div>
+    </header>
+
+  <section id="library">
+      <h2>Your Library</h2>
+      <div class="row">
+        <div class="input-group" style="display:flex; align-items:stretch; flex:1 1 620px; min-width: 360px; max-width: 720px;">
+          <div style="position:relative; flex:1 1 auto;">
+            <input id="title" placeholder="Search title…" oninput="onTitleInput(event)" autocomplete="off" style="width:100%; border-top-right-radius: 0; border-bottom-right-radius: 0;" />
+            <div id="auto-list" class="card" style="position:absolute; top: 46px; left:0; right:0; max-height: 320px; overflow:auto; display:none; z-index: 10;"></div>
+          </div>
+          <select id="type" style="flex:0 0 150px; min-width: 150px; border-top-left-radius: 0; border-bottom-left-radius: 0;">
+          <option value="manga">Manga</option>
+          <option value="anime">Anime</option>
+        </select>
+        </div>
+  <input id="source" placeholder="Source (e.g., anilist)" value="mangadex" />
+        <input id="progress" type="number" min="0" value="0" style="width: 120px;" />
+        <span id="maxLabel" class="muted" style="min-width: 120px; display:inline-block;">max: —</span>
+        <button class="primary" onclick="addItem()">Add</button>
+      </div>
+      <div id="items"></div>
+    </section>
+
+
+    <script>
+  const apiBase = "/api";
+  let token = localStorage.getItem("token") || "";
+
+      function authHeader() { return token ? { 'Authorization': `Bearer ${token}` } : {}; }
+
+      async function loadItems() {
+        if (!token) { document.getElementById('items').innerHTML = '<div class="muted">Sign in to see your library.</div>'; return; }
+        const resp = await fetch(`${apiBase}/library/items`, { headers: { ...authHeader() } });
+        if (!resp.ok) { document.getElementById('items').innerHTML = '<div class="muted">Failed to load.</div>'; return; }
+        const items = await resp.json();
+        const list = document.getElementById('items');
+        list.innerHTML = '';
+        const maxCache = new Map();
+        const ensureMax = async (item) => {
+          const key = `${item.type}:${item.title}`;
+          if (maxCache.has(key)) return maxCache.get(key);
+          try {
+            const resp = await fetch(`${apiBase}/sources/max?q=${encodeURIComponent(item.title)}&type=${encodeURIComponent(item.type)}`, { headers: { ...authHeader() } });
+            if (!resp.ok) return null;
+            const data = await resp.json();
+            maxCache.set(key, data.max ?? null);
+            return data.max ?? null;
+          } catch { return null; }
+        };
+
+        for (const x of items) {
+          const div = document.createElement('div');
+          div.className = 'card';
+          const isManga = (x.type === 'manga');
+          const rwValue = isManga ? 'reading' : 'watching';
+          const rwLabel = isManga ? 'Reading' : 'Watching';
+          const options = [
+            { value: 'planning', label: 'Planning' },
+            { value: rwValue, label: rwLabel },
+            { value: 'dropped', label: 'Dropped' },
+            { value: 'completed', label: 'Completed' },
+          ];
+          const optsHtml = options.map(o => `<option value="${o.value}" ${x.status===o.value? 'selected':''}>${o.label}</option>`).join('');
+          const maxVal = await ensureMax(x);
+          div.innerHTML = `
+            <div class="row" style="justify-content:space-between;">
+              <div style="flex:1; min-width: 200px;"><b>${x.title}</b> <span class="muted">(${x.type})</span></div>
+              <div class="row" style="flex:0 0 auto; align-items:center;">
+                <label class="muted" for="status-${x.id}" style="margin-right:.25rem;">Status</label>
+                <select id="status-${x.id}">${optsHtml}</select>
+                <label class="muted" for="p-${x.id}" style="margin-left:.5rem;">Progress</label>
+                <input id="p-${x.id}" type="number" min="0" value="${x.progress}" style="width:100px;" />
+                <span class="muted" style="min-width:80px;">of ${maxVal ?? '—'}</span>
+                <button class="primary" onclick="updateItem(${x.id})">Save</button>
+                <button onclick="deleteItem(${x.id})">Remove</button>
+              </div>
+            </div>
+          `;
+          list.appendChild(div);
+        }
+      }
+
+      async function addItem() {
+        if (!token) { return showLogin(); }
+        const payload = { title: title.value, type: type.value, source: source.value, status: 'planning', cover_url: selectedSuggestion?.cover_url || undefined, progress: Number(progress.value || 0) };
+        const resp = await fetch(`${apiBase}/library/items`, { method: 'POST', headers: { 'Content-Type': 'application/json', ...authHeader() }, body: JSON.stringify(payload) });
+        if (resp.ok) loadItems();
+      }
+
+      async function connectAniList() {
+        // Get a connect URL and open as a popup
+  if (!token) { return showLogin(); }
+  const resp = await fetch(`/api/anilist/connect-url`, { headers: { ...authHeader() } });
+        if (!resp.ok) return;
+        const { url } = await resp.json();
+        window.open(url, 'anilist_oauth', 'width=600,height=700');
+      }
+
+      window.addEventListener('message', (evt) => {
+        if (evt.data && evt.data.type === 'anilist_connected') {
+          document.getElementById('importAniListBtn').style.display = 'inline-block';
+        }
+        if (evt.data && evt.data.type === 'anilist_error') {
+          alert('AniList connection failed: ' + evt.data.message);
+        }
+      });
+
+      async function importAniList() {
+        const type = prompt('Import type: ANIME or MANGA', 'ANIME');
+        if (!type) return;
+        const resp = await fetch(`/api/anilist/import`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', ...authHeader() },
+          body: JSON.stringify({ media_type: type.toUpperCase() })
+        });
+        if (resp.ok) {
+          const data = await resp.json();
+          alert(`Import complete: ${data.imported} items`);
+          loadItems();
+        } else {
+          alert('Import failed');
+        }
+      }
+
+      let autoTimer = null;
+      let selectedSuggestion = null;
+      function onTitleInput(ev) {
+        selectedSuggestion = null;
+        document.getElementById('maxLabel').textContent = 'max: —';
+        if (autoTimer) clearTimeout(autoTimer);
+        const q = ev.target.value.trim();
+        if (q.length < 2) { document.getElementById('auto-list').style.display = 'none'; return; }
+        autoTimer = setTimeout(() => fetchAutocomplete(q), 180);
+      }
+
+      async function fetchAutocomplete(q) {
+        const t = document.getElementById('type').value;
+        const resp = await fetch(`${apiBase}/sources/autocomplete?q=${encodeURIComponent(q)}&type=${encodeURIComponent(t)}`, { headers: { ...authHeader() } });
+        if (!resp.ok) { document.getElementById('auto-list').style.display = 'none'; return; }
+        const data = await resp.json();
+        const box = document.getElementById('auto-list');
+        box.innerHTML = '';
+        data.forEach(s => {
+          const row = document.createElement('div');
+          row.className = 'row';
+          row.style.cursor = 'pointer';
+          row.style.alignItems = 'center';
+          row.onclick = () => selectSuggestion(s);
+          row.innerHTML = `
+            ${s.cover_url ? `<img src="${s.cover_url}" style="width:38px;height:38px;object-fit:cover;border-radius:.25rem;">` : ''}
+            <div style="flex:1;">${s.title}</div>
+          `;
+          box.appendChild(row);
+        });
+        box.style.display = data.length ? 'block' : 'none';
+      }
+
+      function selectSuggestion(s) {
+        document.getElementById('title').value = s.title;
+        selectedSuggestion = s;
+        const max = (s.type === 'manga') ? (s.chapters || null) : (s.episodes || null);
+        document.getElementById('maxLabel').textContent = `max: ${max ?? '—'}`;
+        // Prefer AniList source when chosen from suggestions
+        document.getElementById('source').value = 'anilist';
+        document.getElementById('auto-list').style.display = 'none';
+      }
+
+      // Simple login/register modal
+      function showLogin() {
+        const div = document.createElement('div');
+        div.className = 'backdrop';
+        div.innerHTML = `<div class="modal">
+          <h3>Sign in</h3>
+          <div class="row"><input id="li-username" placeholder="Username"/> <input id="li-password" type="password" placeholder="Password"/></div>
+          <div class="row">
+            <button class="primary" id="li-login">Login</button>
+            <button id="li-register">Register</button>
+            <button onclick="this.closest('.backdrop').remove()">Close</button>
+          </div>
+        </div>`;
+        document.body.appendChild(div);
+        div.querySelector('#li-login').onclick = async () => {
+          const u = div.querySelector('#li-username').value;
+          const p = div.querySelector('#li-password').value;
+          const form = new URLSearchParams(); form.set('username', u); form.set('password', p);
+          const resp = await fetch(`${apiBase}/auth/token`, { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: form.toString() });
+          if (resp.ok) { const data = await resp.json(); token = data.access_token; localStorage.setItem('token', token); div.remove(); onAuthChange(u); loadItems(); checkAniListStatus(); }
+          else { alert('Login failed'); }
+        };
+        div.querySelector('#li-register').onclick = async () => {
+          const u = div.querySelector('#li-username').value;
+          const p = div.querySelector('#li-password').value;
+          const resp = await fetch(`${apiBase}/auth/register`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ username: u, password: p }) });
+          if (resp.ok) { alert('Registered. Now login.'); }
+          else { alert('Register failed'); }
+        };
+      }
+
+      function logout() { token = ''; localStorage.removeItem('token'); onAuthChange(null); document.getElementById('items').innerHTML=''; }
+      function onAuthChange(username) {
+        document.getElementById('authStatus').textContent = username ? `Signed in as ${username}` : 'Not signed in';
+        document.getElementById('loginBtn').style.display = username ? 'none' : 'inline-block';
+        document.getElementById('logoutBtn').style.display = username ? 'inline-block' : 'none';
+        document.getElementById('connectAniListBtn').style.display = username ? 'inline-block' : 'none';
+        document.getElementById('importAniListBtn').style.display = 'none';
+      }
+
+      async function updateItem(id) {
+        if (!token) return;
+        const statusEl = document.getElementById(`status-${id}`);
+        const progEl = document.getElementById(`p-${id}`);
+        const payload = {
+          status: statusEl ? statusEl.value : undefined,
+          progress: progEl && progEl.value !== '' ? Number(progEl.value) : undefined,
+        };
+        // Remove undefined to avoid sending nulls
+        Object.keys(payload).forEach(k => payload[k] === undefined && delete payload[k]);
+        if (Object.keys(payload).length === 0) return;
+        const resp = await fetch(`${apiBase}/library/items/${id}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json', ...authHeader() },
+          body: JSON.stringify(payload)
+        });
+        if (resp.ok) {
+          loadItems();
+        }
+      }
+
+      async function deleteItem(id) {
+        if (!token) return;
+        const ok = confirm('Remove this item?');
+        if (!ok) return;
+        const resp = await fetch(`${apiBase}/library/items/${id}`, { method: 'DELETE', headers: { ...authHeader() } });
+        if (resp.ok) loadItems();
+      }
+
+      async function checkAniListStatus() {
+        if (!token) return;
+        const resp = await fetch(`/api/anilist/status`, { headers: { ...authHeader() } });
+        if (resp.ok) {
+          const data = await resp.json();
+          if (data.connected) document.getElementById('importAniListBtn').style.display = 'inline-block';
+        }
+      }
+
+      // initial load
+  onAuthChange(null);
+  loadItems();
+  // suggestions removed in favor of autocomplete
+    </script>
+  </body>
+</html>

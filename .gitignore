@@ -1,0 +1,57 @@
+# --- Python bytecode and cache ---
+__pycache__/
+*.py[cod]
+*$py.class
+
+# --- Virtual environments ---
+.venv/
+venv/
+env/
+
+# --- Build / packaging ---
+build/
+dist/
+*.egg-info/
+.eggs/
+*.egg
+
+# --- Logs / coverage / testing ---
+*.log
+.pytest_cache/
+.coverage
+.coverage.*
+coverage.xml
+htmlcov/
+
+# --- Type checkers / linters caches ---
+.mypy_cache/
+.ruff_cache/
+.pyre/
+.pytype/
+
+# --- Environment / secrets ---
+.env
+.env.*
+!.env.example
+
+# --- Databases (local/dev) ---
+app.db
+app_test.db
+*.sqlite3
+*.db
+
+# --- Editor / OS files ---
+.DS_Store
+Thumbs.db
+.idea/
+*.iml
+.vscode/
+
+# --- Node / frontend (if ever used) ---
+node_modules/
+*.tsbuildinfo
+
+# --- Misc ---
+pip-log.txt
+pip-delete-this-directory.txt
+__pypackages__/
